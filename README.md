@@ -23,5 +23,5 @@ An advanced sit-up counting application using MediaPipe for pose detection, with
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Shegaw-tech/AI-Powered-situp-counter.git
+   git clone https://github.com/Shegaw-tech/AI-Powered-sit-up-counter.git
    cd AI-Powered-sit-up-counter
