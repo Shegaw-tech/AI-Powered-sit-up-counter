@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Sit-Up Counter</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1>AI Sit-Up Counter</h1>
+            <p class="app-subtitle">Real-time full sit-up detection with form analysis</p>
+        </header>
+
+        <div class="video-container">
+            <canvas id="canvas"></canvas>
+            <video id="video" autoplay playsinline muted style="display:none"></video>
+            <canvas id="buffer-canvas" style="display:none"></canvas>
+            <div class="video-overlay">
+                <div id="situp-type-label" class="situp-type full">SIT UP</div>
+                <div class="rep-counter" id="count">0</div>
+                <div class="form-feedback" id="feedback"></div>
+                <div class="gesture-hint">Raise hands above head to reset count</div>
+            </div>
+        </div>
+
+        <div class="control-panel">
+            <button id="start-btn" class="btn-primary">
+                <span class="btn-icon">▶</span> Start Session
+            </button>
+            <button id="exit-btn" class="btn-secondary">
+                <span class="btn-icon">⏹</span> End Session
+            </button>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-card">
+                <h3>Workout Instructions</h3>
+                <ol class="instruction-list" id="instructions">
+                    <li>Position yourself 2-3 meters from camera</li>
+                    <li>Keep your entire body visible in frame</li>
+                    <li>Raise both hands above head to reset counter</li>
+                    <li>Perform controlled full sit-up movements</li>
+                    <li>Keep your back straight and core engaged</li>
+                </ol>
+            </div>
+
+            <div class="info-card">
+                <h3>Personalized Recommendations</h3>
+                <ul class="recommendation-list" id="recommendations">
+                    <li>Start with 3 sets of 5-10 sit-ups</li>
+                    <li>Focus on controlled movements</li>
+                    <li>Keep your core engaged throughout</li>
+                    <li>Exhale as you sit up, inhale as you lower</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Elements -->
+    <button id="debug-toggle">Toggle Debug</button>
+    <div id="debug-console"></div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
