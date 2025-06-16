@@ -1,95 +1,135 @@
-#The code is according to PEP 8 coding styles standards
-import logging
-from typing import Dict, Any, Tuple, Optional, List
+"""Human pose analysis module using MediaPipe.
 
+This module provides comprehensive body pose analysis capabilities
+integrated with hand gesture recognition for exercise tracking.
+"""
+
+import logging
+from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import mediapipe as mp
 import numpy as np
+from hand_analyzer import HandGestureAnalyzer
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PoseAnalyzer")
 
 
 class PoseAnalyzer:
-    """Analyzes human pose using MediaPipe for exercise detection."""
+    """Analyzes human body pose using MediaPipe with integrated hand tracking.
 
-    def __init__(self):
-        """Initialize MediaPipe models and configuration parameters."""
-        self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(
-            max_num_hands=2,
-            min_detection_confidence=0.7,
-            min_tracking_confidence=0.5
-        )
+    Attributes:
+        mp_pose: MediaPipe Pose solution module
+        pose: Initialized MediaPipe Pose instance
+        hand_analyzer: Hand gesture recognition instance
+        mp_drawing: MediaPipe drawing utilities
+        mp_drawing_styles: MediaPipe drawing styles
+        alignment_thresholds: Thresholds for posture alignment detection
+        form_thresholds: Thresholds for exercise form evaluation
+    """
 
+    def __init__(self) -> None:
+        """Initialize pose analysis models and configuration."""
         self.mp_pose = mp.solutions.pose
         self.pose = self.mp_pose.Pose(
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5,
-            model_complexity=1,
-            enable_segmentation=False,
-            smooth_landmarks=False
+            model_complexity=1
         )
 
+        self.hand_analyzer = HandGestureAnalyzer()
+
+        # Initialize visualization utilities
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_drawing_styles = mp.solutions.drawing_styles
 
-        self.alignment_thresholds = {
+        # Configure analysis thresholds
+        self.alignment_thresholds: Dict[str, float] = {
             'vertical_threshold': 0.1,
             'min_alignment_time': 0.5,
             'cooldown_time': 1.0
         }
 
-        self.form_thresholds = {
+        self.form_thresholds: Dict[str, float] = {
             'max_shoulder_asymmetry': 0.2,
             'min_back_angle': 150,
             'max_knee_lift': 0.1
         }
 
-        self.gesture_params = {
-            'reset_finger_count': 7,         # Trigger gesture if 7 fingers raised
-            'min_gesture_confidence': 0.7,   # Confidence threshold for hand detection
-            'gesture_cooldown': 1.5          # Cooldown to avoid repeated detections
-        }
-
-    def analyze_pose(self, frame_rgb: np.ndarray) -> Dict[str, Any]:
-        """
-        Analyze pose from an RGB frame.
+    def analyze_pose(self, frame_rgb: np.ndarray) -> Optional[Dict[str, Any]]:
+        """Analyze body pose and hand gestures from an RGB frame.
 
         Args:
-            frame_rgb: Input RGB image frame
+            frame_rgb: Input frame in RGB format with shape (H, W, 3)
 
         Returns:
-            Dictionary containing pose analysis results or None
+            Dictionary containing:
+                - landmarks: Normalized pose landmark coordinates
+                - pose_results: Raw MediaPipe pose results
+                - hand_results: Hand detection results
+            Returns None if no pose detected
         """
         results = self.pose.process(frame_rgb)
         if not results.pose_landmarks:
             return None
 
+        hand_results = self.hand_analyzer.process_frame(frame_rgb)
+
         return {
             'landmarks': results.pose_landmarks.landmark,
             'pose_results': results,
-            'hand_results': self.hands.process(frame_rgb)
+            'hand_results': hand_results
         }
 
-    def is_shoulder_ear_aligned(self, landmarks: list) -> bool:
-        """
-        Check if shoulders and ears are vertically aligned.
+    def draw_keypoints(self, frame: np.ndarray, landmarks: List[Any]) -> np.ndarray:
+        """Draw key anatomical points on frame with color coding.
 
         Args:
-            landmarks: List of pose landmarks
+            frame: Input BGR frame (will be modified in-place)
+            landmarks: List of MediaPipe pose landmarks
 
         Returns:
-            True if aligned, False otherwise
+            Annotated frame with drawn keypoints
         """
-        left_shoulder = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.LEFT_SHOULDER)
-        right_shoulder = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.RIGHT_SHOULDER)
-        left_ear = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.LEFT_EAR)
-        right_ear = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.RIGHT_EAR)
+        keypoints = [
+            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_SHOULDER),
+            (0, 0, 255)),  # Red
+            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.RIGHT_SHOULDER),
+            (0, 0, 255)),  # Red
+            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_HIP),
+            (0, 255, 0)),  # Green
+            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_EAR),
+            (255, 0, 0)),  # Blue
+            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_KNEE),
+            (255, 255, 0))  # Cyan
+        ]
+
+        frame_height, frame_width = frame.shape[:2]
+        for point, color in keypoints:
+            if point:
+                x, y = int(point[0] * frame_width), int(point[1] * frame_height)
+                cv2.circle(frame, (x, y), 8, color, -1)
+
+        return frame
+
+    def is_shoulder_ear_aligned(self, landmarks: List[Any]) -> bool:
+        """Check vertical alignment between shoulders and ears.
+
+        Args:
+            landmarks: List of MediaPipe pose landmarks
+
+        Returns:
+            True if both shoulder-ear pairs are vertically aligned within threshold
+        """
+        left_shoulder = self._get_landmark(landmarks,
+            self.mp_pose.PoseLandmark.LEFT_SHOULDER)
+        right_shoulder = self._get_landmark(landmarks,
+            self.mp_pose.PoseLandmark.RIGHT_SHOULDER)
+        left_ear = self._get_landmark(landmarks,
+            self.mp_pose.PoseLandmark.LEFT_EAR)
+        right_ear = self._get_landmark(landmarks,
+            self.mp_pose.PoseLandmark.RIGHT_EAR)
 
         if not all([left_shoulder, right_shoulder, left_ear, right_ear]):
             return False
@@ -97,91 +137,82 @@ class PoseAnalyzer:
         left_diff = abs(left_shoulder[1] - left_ear[1])
         right_diff = abs(right_shoulder[1] - right_ear[1])
 
-        return (
-            left_diff < self.alignment_thresholds['vertical_threshold']
-            and right_diff < self.alignment_thresholds['vertical_threshold']
-        )
+        return (left_diff < self.alignment_thresholds['vertical_threshold'] and
+                right_diff < self.alignment_thresholds['vertical_threshold'])
 
-    def calculate_metrics(self, landmarks: list) -> Dict[str, float]:
-        """
-        Calculate pose metrics from detected landmarks.
+    def calculate_metrics(self, landmarks: List[Any]) -> Dict[str, float]:
+        """Calculate comprehensive pose metrics for exercise analysis.
 
         Args:
-            landmarks: List of pose landmarks
+            landmarks: List of MediaPipe pose landmarks
 
         Returns:
-            Dictionary of calculated metrics
+            Dictionary of calculated metrics including:
+                - shoulder_lift: Vertical shoulder displacement
+                - back_angle: Torso lean angle
+                - alignment: Shoulder-ear alignment status
+                - head_lift: Head elevation
+                - torso_angle: Upper body angle
+                - shoulder_symmetry: Bilateral shoulder level difference
+                - knee_lift: Knee elevation
+                - knee_shoulder_distance: Limb extension metric
         """
-        nose = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.NOSE)
-        left_shoulder = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.LEFT_SHOULDER)
-        right_shoulder = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.RIGHT_SHOULDER)
-        left_hip = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.LEFT_HIP)
-        left_ear = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.LEFT_EAR)
-        left_knee = self._get_landmark(
-            landmarks, self.mp_pose.PoseLandmark.LEFT_KNEE)
+        metrics: Dict[str, float] = {}
 
-        metrics = {}
-        critical_points = [left_shoulder, left_knee, left_hip]
-        if not all(critical_points):
-            return metrics # Return empty metrics if any critical point is missing
+        # Extract key landmarks
+        required_landmarks = {
+            'nose': self.mp_pose.PoseLandmark.NOSE,
+            'left_shoulder': self.mp_pose.PoseLandmark.LEFT_SHOULDER,
+            'right_shoulder': self.mp_pose.PoseLandmark.RIGHT_SHOULDER,
+            'left_hip': self.mp_pose.PoseLandmark.LEFT_HIP,
+            'left_ear': self.mp_pose.PoseLandmark.LEFT_EAR,
+            'left_knee': self.mp_pose.PoseLandmark.LEFT_KNEE
+        }
 
-        if all([nose, left_shoulder, left_hip]):
-            shoulder_y = left_shoulder[1]
-            hip_y = left_hip[1]
+        landmark_coords = {
+            name: self._get_landmark(landmarks, landmark)
+            for name, landmark in required_landmarks.items()
+        }
+
+        # Calculate core metrics if base landmarks visible
+        if all([landmark_coords['left_shoulder'], landmark_coords['left_hip']]):
+            shoulder_y = landmark_coords['left_shoulder'][1]
+            hip_y = landmark_coords['left_hip'][1]
+
             metrics.update({
-                'head_lift': hip_y - nose[1],
                 'shoulder_lift': hip_y - shoulder_y,
-                'torso_angle': (
-                    self._calculate_angle(left_ear, left_shoulder, left_hip)
-                    if left_ear else 180
-                ),
                 'back_angle': self._calculate_back_angle(
-                    left_shoulder, left_hip),
-                'shoulder_symmetry': (
-                    abs(left_shoulder[1] - right_shoulder[1])
-                    if right_shoulder else 0
+                    landmark_coords['left_shoulder'],
+                    landmark_coords['left_hip']
                 ),
                 'alignment': self.is_shoulder_ear_aligned(landmarks)
             })
 
-            if left_knee:
-                metrics['knee_lift'] = hip_y - left_knee[1]
+            # Optional metrics
+            if landmark_coords['nose']:
+                metrics['head_lift'] = hip_y - landmark_coords['nose'][1]
+
+            if landmark_coords['left_ear']:
+                metrics['torso_angle'] = self._calculate_angle(
+                    landmark_coords['left_ear'],
+                    landmark_coords['left_shoulder'],
+                    landmark_coords['left_hip']
+                )
+
+            if landmark_coords['right_shoulder']:
+                metrics['shoulder_symmetry'] = abs(
+                    landmark_coords['left_shoulder'][1] -
+                    landmark_coords['right_shoulder'][1]
+                )
+
+            if landmark_coords['left_knee']:
+                metrics['knee_lift'] = hip_y - landmark_coords['left_knee'][1]
                 metrics['knee_shoulder_distance'] = self._calculate_distance(
-                    left_shoulder, left_knee)
+                    landmark_coords['left_shoulder'],
+                    landmark_coords['left_knee']
+                )
 
         return metrics
-
-    def draw_keypoints(self, frame: np.ndarray, landmarks: list) -> np.ndarray:
-        """
-        Draw keypoints and connections on the frame.
-
-        Args:
-            frame: Input BGR image frame
-            landmarks: List of pose landmarks
-
-        Returns:
-            Annotated frame with keypoints
-        """
-        keypoints = [
-            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_SHOULDER), (0, 0, 255)),
-            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.RIGHT_SHOULDER), (0, 0, 255)),
-            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_HIP), (0, 255, 0)),
-            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_EAR), (255, 0, 0)),
-            (self._get_landmark(landmarks, self.mp_pose.PoseLandmark.LEFT_KNEE), (255, 255, 0))
-        ]
-
-        h, w = frame.shape[:2]
-        for point, color in keypoints:
-            if point:
-                x, y = int(point[0] * w), int(point[1] * h)
-                cv2.circle(frame, (x, y), 8, color, -1)
-
-        return frame
 
     def detect_reset_gesture(
         self,
@@ -189,118 +220,105 @@ class PoseAnalyzer:
         current_time: float,
         last_gesture_time: float
     ) -> bool:
-        """
-        Detect reset gesture (7 fingers shown).
+        """Detect reset gesture through hand analyzer delegation.
 
         Args:
-            hand_results: MediaPipe hand results
-            current_time: Current timestamp
-            last_gesture_time: Time of last gesture
+            hand_results: MediaPipe hand detection results
+            current_time: Current timestamp in seconds
+            last_gesture_time: Previous gesture detection time
 
         Returns:
-            True if reset gesture detected
+            True if valid reset gesture detected
         """
-        if (
-            hand_results.multi_hand_landmarks
-            and current_time - last_gesture_time
-            > self.gesture_params['gesture_cooldown']
-        ):
-            total_fingers = 0
-            for hand_landmarks, handedness in zip(
-                hand_results.multi_hand_landmarks,
-                hand_results.multi_handedness
-            ):
-                confidence = handedness.classification[0].score
-                if confidence >= self.gesture_params['min_gesture_confidence']:
-                    total_fingers += self._count_fingers(
-                        hand_landmarks,
-                        handedness.classification[0].label
-                    )
-
-            return total_fingers == self.gesture_params['reset_finger_count']
-        return False
+        return self.hand_analyzer.detect_reset_gesture(
+            hand_results,
+            current_time,
+            last_gesture_time
+        )
 
     def _get_landmark(
-        self, landmarks: list, landmark_type: Any
+        self,
+        landmarks: List[Any],
+        landmark_type: Any
     ) -> Optional[Tuple[float, float]]:
-        """
-        Get landmark coordinates if visible.
+        """Extract visible landmark coordinates.
 
         Args:
-            landmarks: List of pose landmarks
-            landmark_type: Landmark type
+            landmarks: List of MediaPipe landmarks
+            landmark_type: Specific landmark to extract
 
         Returns:
-            Tuple of (x, y) or None
+            (x, y) coordinates if landmark visible, else None
         """
         landmark = landmarks[landmark_type.value]
-        if landmark.visibility > 0.5:
-            return (landmark.x, landmark.y)
-        return None
+        return (landmark.x, landmark.y) if landmark.visibility > 0.5 else None
 
     def _calculate_angle(
-        self, a: Tuple[float, float], b: Tuple[float, float], c: Tuple[float, float]
+        self,
+        a: Tuple[float, float],
+        b: Tuple[float, float],
+        c: Tuple[float, float]
     ) -> float:
-        """Calculate angle between three points in degrees."""
+        """Calculate angle between three points (ABC with B as vertex).
+
+        Args:
+            a: First point coordinates
+            b: Vertex point coordinates
+            c: Third point coordinates
+
+        Returns:
+            Angle in degrees (0-180)
+        """
         a, b, c = np.array(a), np.array(b), np.array(c)
-        ba = a - b
-        bc = c - b
+        ba, bc = a - b, c - b
 
         if np.linalg.norm(ba) == 0 or np.linalg.norm(bc) == 0:
             return 180.0
 
-        cosine_angle = np.dot(ba, bc) / (
-            np.linalg.norm(ba) * np.linalg.norm(bc)
-        )
+        cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
         return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
 
     def _calculate_back_angle(
-        self, shoulder: Tuple[float, float], hip: Tuple[float, float]
+        self,
+        shoulder: Tuple[float, float],
+        hip: Tuple[float, float]
     ) -> float:
-        """Calculate back angle relative to vertical."""
+        """Calculate torso angle relative to vertical axis.
+
+        Args:
+            shoulder: Shoulder joint coordinates
+            hip: Hip joint coordinates
+
+        Returns:
+            Angle in degrees between torso and vertical (0=upright, 180=fully bent)
+        """
         vertical = np.array([0, -1])
-        body_vector = np.array([
-            shoulder[0] - hip[0],
-            shoulder[1] - hip[1]
-        ])
+        body_vector = np.array([shoulder[0] - hip[0], shoulder[1] - hip[1]])
 
         if np.linalg.norm(body_vector) == 0:
             return 180.0
 
         cosine = np.dot(vertical, body_vector) / (
-            np.linalg.norm(vertical) * np.linalg.norm(body_vector)
-        )
+            np.linalg.norm(vertical) * np.linalg.norm(body_vector))
         return np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0)))
 
     def _calculate_distance(
-        self, point1: Tuple[float, float], point2: Tuple[float, float]
+        self,
+        point1: Tuple[float, float],
+        point2: Tuple[float, float]
     ) -> float:
-        """Calculate Euclidean distance between two points."""
-        return np.sqrt(
-            (point1[0] - point2[0]) ** 2 +
-            (point1[1] - point2[1]) ** 2
-        )
+        """Calculate Euclidean distance between two points.
 
-    def _count_fingers(
-        self, hand_landmarks: Any, hand_label: str
-    ) -> int:
-        """Count raised fingers on a hand."""
-        landmarks = hand_landmarks.landmark
-        finger_tips = [4, 8, 12, 16, 20]
-        finger_pips = [2, 6, 10, 14, 18]
-        fingers = []
+        Args:
+            point1: First point coordinates
+            point2: Second point coordinates
 
-        # Thumb
-        if (
-            (hand_label == 'Right' and landmarks[4].x < landmarks[2].x) or
-            (hand_label == 'Left' and landmarks[4].x > landmarks[2].x)
-        ):
-            fingers.append(1)
-        else:
-            fingers.append(0)
+        Returns:
+            Straight-line distance between points
+        """
+        return np.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
 
-        # Other fingers
-        for tip, pip in zip(finger_tips[1:], finger_pips[1:]):
-            fingers.append(1 if landmarks[tip].y < landmarks[pip].y else 0)
-
-        return sum(fingers)
+    def close(self) -> None:
+        """Release all MediaPipe resources."""
+        self.pose.close()
+        self.hand_analyzer.close()
